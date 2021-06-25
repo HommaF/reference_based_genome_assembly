@@ -123,7 +123,7 @@ rule extract_unmapped:
 	conda:
 		"envs/dn_assembly.yaml"
 	shell:
-		"samtools view -b -f 4 | samtools view -f 9 - | cut -f1 > {params.unmapped_ids}; "
+		"samtools view -b -f 4 {input.bwa_in} | samtools view -f 9 - | cut -f1 > {params.unmapped_ids}; "
 		"printf '1\n2\n' | xargs -I@ -n 1 -P 2 bash -c 'scripts/extract_fastq.sh @ {params.unmapped_ids} {input.fwd_paired} {input.rev_paired} {output.unm_fwd} {output.unm_rev}'; "
 		"rm {params.unmapped_ids}"
 
