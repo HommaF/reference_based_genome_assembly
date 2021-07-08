@@ -91,19 +91,25 @@ rule extract_mapped:
 	conda:
 		"envs/dn_assembly.yaml"
 	shell:
-		"samtools view -b -@ 3 -F 4 {input.bwa_in} > {output.bwa_out}; "
+		"samtools view -b -@ 3 -F 4 -F 8 {input.bwa_in} > {output.bwa_out}; "
 		"samtools index {output.bwa_out}"
 
 rule filter_mapped:
 	input:
-		"results/bwa_aligned/{reference_genome}_{sample}_mapped.bam"
+		mapped = "results/bwa_aligned/{reference_genome}_{sample}_mapped.bam",
+                bwa_in = "results/bwa_aligned/{reference_genome}_{sample}_sorted.bam"
 	output:
-		"results/bwa_aligned/{reference_genome}_{sample}_mapped_filtered.bam"
+		mapped = "results/bwa_aligned/{reference_genome}_{sample}_mapped_filtered.bam",
+		bwa_in = "results/bwa_aligned/{reference_genome}_{sample}_sorted_filtered.bam",
+		bwa_in_index = "results/bwa_aligned/{reference_genome}_{sample}_sorted_filtered.bam.bai"
+
 	threads: 4
 	conda:
 		"envs/dn_assembly.yaml"
 	shell:
-		"samtools view -b -@ 3 -q 10 {input} > {output}"
+		"samtools view -b -@ 3 -q 10 {input.mapped} > {output.mapped};"
+		"samtools view -b -@ 3 -q 10 {input.bwa_in} > {output.bwa_in};"
+		"samtools index -@ 3 {output.bwa_in_index}"
 
 rule mapped_genomecov:
 	input:
@@ -143,14 +149,42 @@ rule define_superblocks:
 		blocks = "results/blocks/{reference_genome}_{sample}_blocks.tsv",
 		superblocks = "results/blocks/{reference_genome}_{sample}_superblocks.tsv"
 
-	threads: 1
+	params:
+		tmp_files = "results/blocks/tmp_*ids.txt"
+
+	threads: 12
 	conda:
 		"envs/dn_assembly.yaml"
 
 	shell:
 		"scripts/gen_superblocks.sh {input} {output.tmp_blocks};"
-		"scripts/gen_superblocks.py {output.tmp_blocks} {output.blocks} {output.superblocks}"
+		"scripts/gen_superblocks.py {output.tmp_blocks} {output.blocks} {output.superblocks};"
+		"scripts/superblock_reads.sh {output.superblocks}"
+	
 
+rule extract_superblock_reads:
+	input:
+		superblocks = "results/blocks/{reference_genome}_{sample}_superblocks.tsv",
+		fwd_paired="results/trimmomatic/{sample}_R1_paired.fastq.gz",
+		rev_paired="results/trimmomatic/{sample}_R2_paired.fastq.gz"
+
+
+	output:
+		directory("results/blocks/{reference_genome}_{sample}_superblock_fastq/")
+
+	params:
+		wdir = "results/blocks/tmp_*_ids.txt",
+		fastq = "*.fastq.gz"
+
+	threads: 12
+
+	conda:
+		"envs/dn_assembly.yaml"
+	
+	shell:
+		"ls {params.wdir} | cut -d '_' -f2,3 | xargs -I@ -n 1 -P 12 bash -c 'seqkit grep --threads 1 --pattern-file results/blocks/tmp_@_ids.txt {input.fwd_paired} | bgzip > @_R1.fastq.gz';"
+		"ls {params.wdir} | cut -d '_' -f2,3 | xargs -I@ -n 1 -P 12 bash -c 'seqkit grep --threads 1 --pattern-file results/blocks/tmp_@_ids.txt {input.rev_paired} | bgzip > @_R2.fastq.gz';"
+		"mv {params.fastq} {output}"
 
 rule extract_unmapped:
 	input:
@@ -181,7 +215,8 @@ rule combine:
 		bam = "results/bwa_aligned/{reference_genome}_{sample}_mapped_filtered.bam",
 		mapped_filtered = "results/bwa_aligned/{reference_genome}_{sample}_mapped_filtered_histogram.tsv.gz",
 		proper_mapped_filtered = "results/bwa_aligned/{reference_genome}_{sample}_proper_mapped_filtered_histogram.tsv.gz",
-		superblocks = "results/blocks/{reference_genome}_{sample}_superblocks.tsv"
+		superblocks = "results/blocks/{reference_genome}_{sample}_superblocks.tsv",
+		outdir = directory("results/blocks/{reference_genome}_{sample}_superblock_fastq/")
 
 	output:
 		"results/bwa_aligned/{reference_genome}_{sample}_done.txt"
