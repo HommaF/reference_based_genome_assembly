@@ -2,17 +2,17 @@ configfile: "config.json"
 
 rule all:
 	input:
-		expand("bwa_aligned/{reference_genome}_{sample}_done.txt", sample=config["samples"], reference_genome=config["reference_genome"])
+		expand("results/bwa_aligned/{reference_genome}_{sample}_done.txt", sample=config["samples"], reference_genome=config["reference_genome"])
 
 rule trimmomatic:
 	input:
 		fwd="genomic_reads/{sample}_R1.fastq.gz",
 		rev="genomic_reads/{sample}_R2.fastq.gz"
 	output:
-		fwd_paired="trimmomatic/{sample}_R1_paired.fastq.gz",
-		fwd_unpaired="trimmomatic/{sample}_R1_unpaired.fastq.gz",
-		rev_paired="trimmomatic/{sample}_R2_paired.fastq.gz",
-		rev_unpaired="trimmomatic/{sample}_R2_unpaired.fastq.gz"
+		fwd_paired="results/trimmomatic/{sample}_R1_paired.fastq.gz",
+		fwd_unpaired="results/trimmomatic/{sample}_R1_unpaired.fastq.gz",
+		rev_paired="results/trimmomatic/{sample}_R2_paired.fastq.gz",
+		rev_unpaired="results/trimmomatic/{sample}_R2_unpaired.fastq.gz"
 
 	conda:
 		"envs/dn_assembly.yaml"
@@ -23,10 +23,10 @@ rule trimmomatic:
 
 rule fastQC:
 	input:
-		fwd_paired="trimmomatic/{sample}_R1_paired.fastq.gz",
-		rev_paired="trimmomatic/{sample}_R2_paired.fastq.gz"
+		fwd_paired="results/trimmomatic/{sample}_R1_paired.fastq.gz",
+		rev_paired="results/trimmomatic/{sample}_R2_paired.fastq.gz"
 	output:
-		directory("fastqc/{sample}")
+		directory("results/fastqc/{sample}")
 	threads: 2
 	conda:
 		"envs/dn_assembly.yaml"
@@ -49,10 +49,10 @@ rule filter_scaffold:
 		"bwa index {output.filtered}"
 rule bwa_align:
 	input:
-		fwd_paired="trimmomatic/{sample}_R1_paired.fastq.gz",
-		rev_paired="trimmomatic/{sample}_R2_paired.fastq.gz",
+		fwd_paired="results/trimmomatic/{sample}_R1_paired.fastq.gz",
+		rev_paired="results/trimmomatic/{sample}_R2_paired.fastq.gz",
 		genome="reference_genome/{reference_genome}_filtered.fasta",
-		fastqc="fastqc/{sample}/"
+		fastqc="results/fastqc/{sample}/"
 
 	output:
 		"bwa_aligned/{reference_genome}_{sample}_sorted.bam"
@@ -70,9 +70,9 @@ rule bwa_align:
 
 rule index_mapped:
 	input:
-                "bwa_aligned/{reference_genome}_{sample}_sorted.bam"
+                "results/bwa_aligned/{reference_genome}_{sample}_sorted.bam"
 	output:
-                "bwa_aligned/{reference_genome}_{sample}_sorted.bam.bai"
+                "results/bwa_aligned/{reference_genome}_{sample}_sorted.bam.bai"
 
 	threads: 1
 	conda:
@@ -82,11 +82,11 @@ rule index_mapped:
 
 rule extract_mapped:
 	input:
-                bwa_in = "bwa_aligned/{reference_genome}_{sample}_sorted.bam",
-                bai_in = "bwa_aligned/{reference_genome}_{sample}_sorted.bam.bai"
+                bwa_in = "results/bwa_aligned/{reference_genome}_{sample}_sorted.bam",
+                bai_in = "results/bwa_aligned/{reference_genome}_{sample}_sorted.bam.bai"
 	output:
-		bwa_out = "bwa_aligned/{reference_genome}_{sample}_mapped.bam",
-		bai_out = "bwa_aligned/{reference_genome}_{sample}_mapped.bam.bai"
+		bwa_out = "results/bwa_aligned/{reference_genome}_{sample}_mapped.bam",
+		bai_out = "results/bwa_aligned/{reference_genome}_{sample}_mapped.bam.bai"
 	threads: 4
 	conda:
 		"envs/dn_assembly.yaml"
@@ -96,28 +96,75 @@ rule extract_mapped:
 
 rule filter_mapped:
 	input:
-		"bwa_aligned/{reference_genome}_{sample}_mapped.bam"
+		"results/bwa_aligned/{reference_genome}_{sample}_mapped.bam"
 	output:
-		"bwa_aligned/{reference_genome}_{sample}_mapped_filtered.bam"
+		"results/bwa_aligned/{reference_genome}_{sample}_mapped_filtered.bam"
 	threads: 4
 	conda:
 		"envs/dn_assembly.yaml"
 	shell:
 		"samtools view -b -@ 3 -q 10 {input} > {output}"
 
+rule mapped_genomecov:
+	input:
+		"results/bwa_aligned/{reference_genome}_{sample}_mapped_filtered.bam"
+	output:
+		"results/bwa_aligned/{reference_genome}_{sample}_mapped_filtered_histogram.tsv.gz"
+
+	threads: 1
+	conda: 
+		"envs/dn_assembly.yaml"
+
+	shell:
+		"bedtools genomecov -ibam {input} -bga | bgzip > {output}"
+
+rule propper_mapped_genomecov:
+	input:
+		"results/bwa_aligned/{reference_genome}_{sample}_mapped_filtered.bam"
+	output:
+		"results/bwa_aligned/{reference_genome}_{sample}_proper_mapped_filtered_histogram.tsv.gz"
+
+	params: ref_genome_index = "reference_genome/{reference_genome}.fasta.fai"
+
+	threads: 1
+
+	conda:
+		"envs/dn_assembly.yaml"
+	
+	shell:
+		"samtools view -bf 0x2 {input} | samtools sort - -n | bedtools bamtobed -i - -bedpe | awk '$1 == $4' | cut -f1,2,6 | sort -k 1,1 | bedtools genomecov -i - -bga -g {params.ref_genome_index} | bgzip > {output}"
+	
+
+rule define_superblocks:
+	input:
+		"results/bwa_aligned/{reference_genome}_{sample}_proper_mapped_filtered_histogram.tsv.gz"
+	output:
+		tmp_blocks = temp("results/blocks/{reference_genome}_{sample}_tmp_blocks.tsv"),
+		blocks = "results/blocks/{reference_genome}_{sample}_blocks.tsv",
+		superblocks = "results/blocks/{reference_genome}_{sample}_superblocks.tsv"
+
+	threads: 1
+	conda:
+		"envs/dn_assembly.yaml"
+
+	shell:
+		"scripts/gen_superblocks.sh {input} {output.tmp_blocks};"
+		"scripts/gen_superblocks.py {output.tmp_blocks} {output.blocks} {output.superblocks}"
+
+
 rule extract_unmapped:
 	input:
-		bwa_in = "bwa_aligned/{reference_genome}_{sample}_sorted.bam",
-		bai_in = "bwa_aligned/{reference_genome}_{sample}_sorted.bam.bai",
-		fwd_paired="trimmomatic/{sample}_R1_paired.fastq.gz",
-		rev_paired="trimmomatic/{sample}_R2_paired.fastq.gz"
+		bwa_in = "results/bwa_aligned/{reference_genome}_{sample}_sorted.bam",
+		bai_in = "results/bwa_aligned/{reference_genome}_{sample}_sorted.bam.bai",
+		fwd_paired="results/trimmomatic/{sample}_R1_paired.fastq.gz",
+		rev_paired="results/trimmomatic/{sample}_R2_paired.fastq.gz"
 	output:
-		unm_fwd = "bwa_aligned/{reference_genome}_{sample}_unmapped_R1.fq.gz",
-		unm_rev = "bwa_aligned/{reference_genome}_{sample}_unmapped_R2.fq.gz"
+		unm_fwd = "results/bwa_aligned/{reference_genome}_{sample}_unmapped_R1.fq.gz",
+		unm_rev = "results/bwa_aligned/{reference_genome}_{sample}_unmapped_R2.fq.gz"
 
 	
 	params:
-		unmapped_ids = "bwa_aligned/{reference_genome}_{sample}_unmapped_ids.txt"
+		unmapped_ids = "results/bwa_aligned/{reference_genome}_{sample}_unmapped_ids.txt"
 
 	threads: 1
 	conda:
@@ -130,11 +177,14 @@ rule extract_unmapped:
 
 rule combine:
 	input:
-		unm_rev = "bwa_aligned/{reference_genome}_{sample}_unmapped_R2.fq.gz",
-		bam = "bwa_aligned/{reference_genome}_{sample}_mapped_filtered.bam"
+		unm_rev = "results/bwa_aligned/{reference_genome}_{sample}_unmapped_R2.fq.gz",
+		bam = "results/bwa_aligned/{reference_genome}_{sample}_mapped_filtered.bam",
+		mapped_filtered = "results/bwa_aligned/{reference_genome}_{sample}_mapped_filtered_histogram.tsv.gz",
+		proper_mapped_filtered = "results/bwa_aligned/{reference_genome}_{sample}_proper_mapped_filtered_histogram.tsv.gz",
+		superblocks = "results/blocks/{reference_genome}_{sample}_superblocks.tsv"
 
 	output:
-		"bwa_aligned/{reference_genome}_{sample}_done.txt"
+		"results/bwa_aligned/{reference_genome}_{sample}_done.txt"
 	threads: 1
 
 	shell:
