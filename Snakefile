@@ -145,12 +145,9 @@ rule define_superblocks:
 	input:
 		"results/bwa_aligned/{reference_genome}_{sample}_proper_mapped_filtered_histogram.tsv.gz"
 	output:
-		tmp_blocks = temp("results/blocks/{reference_genome}_{sample}_tmp_blocks.tsv"),
+		tmp_blocks = "results/blocks/{reference_genome}_{sample}_tmp_blocks.tsv",
 		blocks = "results/blocks/{reference_genome}_{sample}_blocks.tsv",
 		superblocks = "results/blocks/{reference_genome}_{sample}_superblocks.tsv"
-
-	params:
-		tmp_files = "results/blocks/tmp_*ids.txt"
 
 	threads: 12
 	conda:
@@ -161,31 +158,6 @@ rule define_superblocks:
 		"scripts/gen_superblocks.py {output.tmp_blocks} {output.blocks} {output.superblocks};"
 		"scripts/superblock_reads.sh {output.superblocks}"
 	
-
-rule extract_superblock_reads:
-	input:
-		superblocks = "results/blocks/{reference_genome}_{sample}_superblocks.tsv",
-		fwd_paired="results/trimmomatic/{sample}_R1_paired.fastq.gz",
-		rev_paired="results/trimmomatic/{sample}_R2_paired.fastq.gz"
-
-
-	output:
-		directory("results/blocks/{reference_genome}_{sample}_superblock_fastq/")
-
-	params:
-		wdir = "results/blocks/tmp_*_ids.txt",
-		fastq = "*.fastq.gz"
-
-	threads: 12
-
-	conda:
-		"envs/dn_assembly.yaml"
-	
-	shell:
-		"ls {params.wdir} | cut -d '_' -f2,3 | xargs -I@ -n 1 -P 12 bash -c 'seqkit grep --threads 1 --pattern-file results/blocks/tmp_@_ids.txt {input.fwd_paired} | bgzip > @_R1.fastq.gz';"
-		"ls {params.wdir} | cut -d '_' -f2,3 | xargs -I@ -n 1 -P 12 bash -c 'seqkit grep --threads 1 --pattern-file results/blocks/tmp_@_ids.txt {input.rev_paired} | bgzip > @_R2.fastq.gz';"
-		"mv {params.fastq} {output}"
-
 rule extract_unmapped:
 	input:
 		bwa_in = "results/bwa_aligned/{reference_genome}_{sample}_sorted.bam",
@@ -215,8 +187,7 @@ rule combine:
 		bam = "results/bwa_aligned/{reference_genome}_{sample}_mapped_filtered.bam",
 		mapped_filtered = "results/bwa_aligned/{reference_genome}_{sample}_mapped_filtered_histogram.tsv.gz",
 		proper_mapped_filtered = "results/bwa_aligned/{reference_genome}_{sample}_proper_mapped_filtered_histogram.tsv.gz",
-		superblocks = "results/blocks/{reference_genome}_{sample}_superblocks.tsv",
-		outdir = directory("results/blocks/{reference_genome}_{sample}_superblock_fastq/")
+		superblocks = "results/blocks/{reference_genome}_{sample}_superblocks.tsv"
 
 	output:
 		"results/bwa_aligned/{reference_genome}_{sample}_done.txt"
