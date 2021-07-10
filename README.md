@@ -11,3 +11,5 @@ graph TD;
 
 *Workflow based on [Lischer et al. 2017](https://bmcbioinformatics.biomedcentral.com/articles/10.1186/s12859-017-1911-6)*
 graph TD;
+
+![plot](workflow.svg)
